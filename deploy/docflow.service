@@ -1,0 +1,21 @@
+[Unit]
+Description=DocFlow Server
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=docflow
+WorkingDirectory=/opt/docflow
+EnvironmentFile=/etc/docflow/env
+ExecStart=/opt/docflow/docflow-server -config /etc/docflow/config.yaml -migrations /opt/docflow/migrations
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/docflow /var/log/docflow
+
+[Install]
+WantedBy=multi-user.target

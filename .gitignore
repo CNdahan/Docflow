@@ -1,0 +1,32 @@
+# 二进制 / 构建产物
+/backend/docflow-server
+/backend/docflow-server.exe
+/backend/docflow-admin
+/backend/docflow-admin.exe
+/backend/_data/
+
+# 配置文件 (含密钥等敏感信息)
+/backend/config.yaml
+/backend/.env
+
+# Go
+*.test
+*.prof
+
+# 前端
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/
+/frontend/*.local
+/frontend/src/**/*.js
+/frontend/src/**/*.js.map
+/frontend/vite.config.js
+/frontend/vite.config.js.map
+/frontend/tsconfig.tsbuildinfo
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp

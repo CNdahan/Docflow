@@ -1,0 +1,47 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  base_url: "http://localhost:8080"
+
+database:
+  host: "127.0.0.1"
+  port: 5432
+  user: "docflow"
+  password: ""              # 推荐由环境变量 DOCFLOW_DB_PASSWORD 提供
+  dbname: "docflow"
+  sslmode: "disable"
+  max_open_conns: 25
+  max_idle_conns: 5
+
+storage:
+  root: "./_data/files"
+  tmp_dir: "./_data/tmp"
+  max_file_size: 20971520               # 20 MB
+  max_inline_image_size: 5242880        # 5 MB
+  max_attachments_per_document: 10
+  max_templates_per_document: 5
+  max_attachments_per_submission: 10
+  max_inline_images_per_document: 20
+
+auth:
+  jwt_secret: ""                        # 推荐由环境变量 DOCFLOW_JWT_SECRET 提供
+  access_token_ttl: 3600                # 1 小时,单位秒
+  refresh_token_ttl: 604800             # 7 天
+  bcrypt_cost: 12
+
+# 初始 super 兜底机制:默认关闭,推荐用 cmd/admin CLI 显式创建
+initial_super:
+  enabled: false
+  username: "admin"
+  password: ""
+  real_name: "超级管理员"
+
+log:
+  level: "info"                         # debug/info/warn/error
+  format: "console"                     # json/console
+  output: ""                            # 空=stdout,可写文件路径
+
+cors:
+  allow_origins:
+    - "http://localhost:5173"
+    - "http://localhost:8080"
