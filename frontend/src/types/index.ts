@@ -1,10 +1,11 @@
-export type UserRole = 'super' | 'dept' | 'user';
+export type UserRole = 'super' | 'dept' | 'normal';
 
 export interface User {
   id: number;
   username: string;
   role: UserRole;
   department_id?: number | null;
+  department_ids?: number[];
   real_name: string;
   disabled: boolean;
   created_at?: string;
@@ -112,4 +113,48 @@ export interface DocumentOverview {
     overdue: number;
     returned: number;
   }>;
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface GlobalOverview {
+  total_documents: number;
+  active_documents: number;
+  by_department: Array<{
+    department_id: number;
+    department_name: string;
+    total: number;
+    submitted: number;
+    late: number;
+    pending: number;
+    overdue: number;
+    returned: number;
+  }>;
+}
+
+export interface DeptDocRow {
+  document_id: number;
+  title: string;
+  deadline?: string | null;
+  total: number;
+  submitted: number;
+  late: number;
+  pending: number;
+  overdue: number;
+  returned: number;
+}
+
+export interface DepartmentOverview {
+  department: Department;
+  documents: DeptDocRow[];
+}
+
+export interface DocumentRevision {
+  id: number;
+  document_id: number;
+  editor_id: number;
+  change_type: string;
+  diff_summary: string;
+  created_at: string;
 }

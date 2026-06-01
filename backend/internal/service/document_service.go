@@ -136,14 +136,14 @@ func (s *DocumentService) Publish(publisherID int64, publisherRole string, publi
 
 func (s *DocumentService) resolveRecipients(tx *gorm.DB, scope string, deptIDs []int64, publisherDept *int64) ([]int64, map[int64]*int64, error) {
 	var users []model.User
-	q := tx.Model(&model.User{}).Where("role = ? AND disabled = false", model.RoleUser)
+	q := tx.Model(&model.User{}).Where("role = ? AND disabled = false", model.RoleNormal)
 	switch scope {
 	case model.ScopeDepartment:
-		q = q.Where("department_id IN ?", deptIDs)
+		q = q.Where("id IN (SELECT user_id FROM user_departments WHERE department_id IN ?)", deptIDs)
 	case model.ScopeOwnDepartment:
-		q = q.Where("department_id = ?", *publisherDept)
+		q = q.Where("id IN (SELECT user_id FROM user_departments WHERE department_id = ?)", *publisherDept)
 	case model.ScopeAllUsers:
-		// no extra
+		// no extra filter
 	}
 	if err := q.Find(&users).Error; err != nil {
 		return nil, nil, err
@@ -152,7 +152,8 @@ func (s *DocumentService) resolveRecipients(tx *gorm.DB, scope string, deptIDs [
 	deptMap := make(map[int64]*int64, len(users))
 	for _, u := range users {
 		ids = append(ids, u.ID)
-		deptMap[u.ID] = u.DepartmentID
+		// 上报归发布者的部门
+		deptMap[u.ID] = publisherDept
 	}
 	return ids, deptMap, nil
 }
@@ -432,4 +433,147 @@ func (s *DocumentService) Recall(docID, operatorID int64, operatorRole string) e
 		return nil
 	}
 	return s.db.Model(&doc).Update("status", model.DocumentStatusRecalled).Error
+}
+
+// ---- 公文编辑 ----
+
+type UpdateDocInput struct {
+	Title                    *string    `json:"title"`
+	ContentHTML              *string    `json:"content_html"`
+	Deadline                 *time.Time `json:"deadline"`
+	ClearDeadline            bool       `json:"clear_deadline"`
+	AddReadingAttachmentIDs  []int64    `json:"add_reading_attachment_ids"`
+	AddTemplateAttachmentIDs []int64    `json:"add_template_attachment_ids"`
+	RemoveAttachmentIDs      []int64    `json:"remove_attachment_ids"`
+}
+
+func (s *DocumentService) Update(docID, operatorID int64, operatorRole string, in UpdateDocInput) (*model.Document, error) {
+	var doc model.Document
+	if err := s.db.First(&doc, docID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, err
+	}
+	if operatorRole != model.RoleSuper && doc.PublisherID != operatorID {
+		return nil, errs.ErrForbidden
+	}
+	if doc.Status != model.DocumentStatusActive {
+		return nil, errs.New(http.StatusBadRequest, "DOC_INACTIVE", "已撤回的公文不能编辑")
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		patches := map[string]any{}
+		var revisions []model.DocumentRevision
+
+		if in.Title != nil && strings.TrimSpace(*in.Title) != doc.Title {
+			t := strings.TrimSpace(*in.Title)
+			patches["title"] = t
+			revisions = append(revisions, model.DocumentRevision{
+				DocumentID: docID, EditorID: operatorID,
+				ChangeType: model.RevisionMeta, DiffSummary: "修改了标题",
+			})
+		}
+		if in.ContentHTML != nil {
+			clean := s.sanitizer.Sanitize(*in.ContentHTML)
+			if clean != doc.ContentHTML {
+				patches["content_html"] = clean
+				revisions = append(revisions, model.DocumentRevision{
+					DocumentID: docID, EditorID: operatorID,
+					ChangeType: model.RevisionContent, DiffSummary: "修改了正文",
+				})
+			}
+		}
+		if in.ClearDeadline {
+			patches["deadline"] = nil
+			revisions = append(revisions, model.DocumentRevision{
+				DocumentID: docID, EditorID: operatorID,
+				ChangeType: model.RevisionDeadline, DiffSummary: "清除了截止时间",
+			})
+		} else if in.Deadline != nil {
+			patches["deadline"] = *in.Deadline
+			revisions = append(revisions, model.DocumentRevision{
+				DocumentID: docID, EditorID: operatorID,
+				ChangeType: model.RevisionDeadline,
+				DiffSummary: fmt.Sprintf("截止时间改为 %s", in.Deadline.Format("2006-01-02 15:04")),
+			})
+		}
+
+		if len(patches) > 0 {
+			if err := tx.Model(&doc).Updates(patches).Error; err != nil {
+				return err
+			}
+		}
+
+		// 删除附件
+		if len(in.RemoveAttachmentIDs) > 0 {
+			var toRemove []model.Attachment
+			if err := tx.Where("id IN ? AND owner_type = ? AND owner_id = ?",
+				in.RemoveAttachmentIDs, model.OwnerDocument, docID).
+				Find(&toRemove).Error; err != nil {
+				return err
+			}
+			for _, a := range toRemove {
+				_ = s.storage.Remove(a.StoredPath)
+			}
+			if err := tx.Where("id IN ? AND owner_type = ? AND owner_id = ?",
+				in.RemoveAttachmentIDs, model.OwnerDocument, docID).
+				Delete(&model.Attachment{}).Error; err != nil {
+				return err
+			}
+			if len(toRemove) > 0 {
+				revisions = append(revisions, model.DocumentRevision{
+					DocumentID: docID, EditorID: operatorID,
+					ChangeType:  model.RevisionAttachment,
+					DiffSummary: fmt.Sprintf("删除了 %d 个附件", len(toRemove)),
+				})
+			}
+		}
+
+		// 新增附件
+		addedCount := 0
+		if err := s.attachToDocument(tx, docID, operatorID, in.AddReadingAttachmentIDs, model.PurposeReading); err != nil {
+			return err
+		}
+		addedCount += len(in.AddReadingAttachmentIDs)
+		if err := s.attachToDocument(tx, docID, operatorID, in.AddTemplateAttachmentIDs, model.PurposeTemplate); err != nil {
+			return err
+		}
+		addedCount += len(in.AddTemplateAttachmentIDs)
+		if addedCount > 0 {
+			revisions = append(revisions, model.DocumentRevision{
+				DocumentID: docID, EditorID: operatorID,
+				ChangeType:  model.RevisionAttachment,
+				DiffSummary: fmt.Sprintf("新增了 %d 个附件", addedCount),
+			})
+		}
+
+		if len(revisions) > 0 {
+			if err := tx.Create(&revisions).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.db.First(&doc, docID)
+	return &doc, nil
+}
+
+// ListRevisions 查询公文修订日志
+func (s *DocumentService) ListRevisions(docID int64) ([]model.DocumentRevision, error) {
+	var doc model.Document
+	if err := s.db.First(&doc, docID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, err
+	}
+	var revs []model.DocumentRevision
+	if err := s.db.Where("document_id = ?", docID).Order("id DESC").Find(&revs).Error; err != nil {
+		return nil, err
+	}
+	return revs, nil
 }

@@ -48,7 +48,11 @@ func (s *AuthService) Login(username, password string) (*LoginResult, error) {
 	if !auth.VerifyPassword(u.PasswordHash, password) {
 		return nil, errs.New(http.StatusUnauthorized, "INVALID_CREDENTIAL", "用户名或密码错误")
 	}
-	tokens, err := s.tm.Issue(u.ID, u.Role, u.DepartmentID)
+	var deptID *int64
+	if u.Role == model.RoleDept {
+		deptID = u.DepartmentID
+	}
+	tokens, err := s.tm.Issue(u.ID, u.Role, deptID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +79,11 @@ func (s *AuthService) Refresh(refreshToken string) (*LoginResult, error) {
 	if u.Disabled {
 		return nil, errs.New(http.StatusForbidden, "ACCOUNT_DISABLED", "账号已被禁用")
 	}
-	tokens, err := s.tm.Issue(u.ID, u.Role, u.DepartmentID)
+	var deptID2 *int64
+	if u.Role == model.RoleDept {
+		deptID2 = u.DepartmentID
+	}
+	tokens, err := s.tm.Issue(u.ID, u.Role, deptID2)
 	if err != nil {
 		return nil, err
 	}

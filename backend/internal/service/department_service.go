@@ -41,9 +41,9 @@ func (s *DepartmentService) List() ([]DepartmentDTO, error) {
 		Cnt          int64
 	}
 	var rows []row
-	if err := s.db.Model(&model.User{}).
+	if err := s.db.Model(&model.UserDepartment{}).
 		Select("department_id, COUNT(*) AS cnt").
-		Where("department_id IN ? AND disabled = false", ids).
+		Where("department_id IN ?", ids).
 		Group("department_id").Scan(&rows).Error; err != nil {
 		return nil, err
 	}

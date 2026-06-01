@@ -29,7 +29,7 @@ function fmt(ts?: string | null) {
 }
 
 function openDoc(docId: number) {
-  router.push(`/user/documents/${docId}`);
+  router.push(`/normal/documents/${docId}`);
 }
 
 onMounted(reload);

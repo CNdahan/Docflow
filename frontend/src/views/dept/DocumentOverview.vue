@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, reactive } from 'vue';
+import { onMounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -8,32 +8,21 @@ import * as subApi from '@/api/attachments';
 import * as statsApi from '@/api/stats';
 import AttachmentList from '@/components/AttachmentList.vue';
 import StatusTag from '@/components/StatusTag.vue';
-import type { DocumentDetail, DocumentOverview, UserSubmissionRow, DocumentRevision } from '@/types';
+import type { DocumentDetail, DocumentOverview, UserSubmissionRow } from '@/types';
+import { useAuthStore } from '@/stores/auth';
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const docId = Number(route.params.id);
 
 const detail = ref<DocumentDetail | null>(null);
 const overview = ref<DocumentOverview | null>(null);
 const loading = ref(false);
 
-// 上报详情对话框
-const detailDialog = ref({
-  visible: false,
-  loading: false,
-  data: null as subApi.SubmissionDetail | null,
-});
+const detailDialog = ref({ visible: false, loading: false, data: null as subApi.SubmissionDetail | null });
+const returnDialog = ref({ visible: false, submitting: false, submissionId: 0, reason: '' });
 
-// 退回对话框
-const returnDialog = ref({
-  visible: false,
-  submitting: false,
-  submissionId: 0,
-  reason: '',
-});
-
-// 纵览分页
 const overviewPage = ref(1);
 const overviewSize = ref(20);
 const overviewStatus = ref('');
@@ -43,9 +32,7 @@ async function reload() {
   try {
     detail.value = await api.getDocument(docId);
     await reloadOverview();
-  } finally {
-    loading.value = false;
-  }
+  } finally { loading.value = false; }
 }
 
 async function reloadOverview() {
@@ -56,28 +43,15 @@ async function reloadOverview() {
   });
 }
 
-function onOverviewPageChange(p: number) {
-  overviewPage.value = p;
-  reloadOverview();
-}
-function onOverviewSizeChange(s: number) {
-  overviewSize.value = s;
-  overviewPage.value = 1;
-  reloadOverview();
-}
-function onStatusFilter(s: string) {
-  overviewStatus.value = s;
-  overviewPage.value = 1;
-  reloadOverview();
-}
+function onOverviewPageChange(p: number) { overviewPage.value = p; reloadOverview(); }
+function onOverviewSizeChange(s: number) { overviewSize.value = s; overviewPage.value = 1; reloadOverview(); }
+function onStatusFilter(s: string) { overviewStatus.value = s; overviewPage.value = 1; reloadOverview(); }
 
 async function onExportOverview() {
   await statsApi.exportDocumentOverview(docId, `${detail.value?.title || '纵览'}.xlsx`);
 }
 
-function fmt(ts?: string | null) {
-  return ts ? dayjs(ts).format('YYYY-MM-DD HH:mm') : '-';
-}
+function fmt(ts?: string | null) { return ts ? dayjs(ts).format('YYYY-MM-DD HH:mm') : '-'; }
 
 function scopeLabel(s?: string) {
   return s ? ({ DEPARTMENT: '指定部门', ALL_USERS: '全员', OWN_DEPARTMENT: '本部门' } as any)[s] || s : '-';
@@ -89,109 +63,42 @@ const progress = computed(() => {
   return Math.round(((s.submitted + s.late) * 100) / s.total);
 });
 
+const isPublisher = computed(() => detail.value?.publisher_id === auth.user?.id);
+
 async function onRecall() {
-  await ElMessageBox.confirm('确定撤回这条公文?撤回后所有未上报记录将作废', '撤回确认', {
-    type: 'warning',
-  });
+  await ElMessageBox.confirm('确定撤回这条公文?', '撤回确认', { type: 'warning' });
   await api.recallDocument(docId);
   ElMessage.success('已撤回');
-  router.push('/super/documents');
+  router.push('/dept/documents');
 }
 
 async function openDetail(row: UserSubmissionRow) {
-  if (!row.submission_id) {
-    ElMessage.info('该用户尚未上报');
-    return;
-  }
+  if (!row.submission_id) { ElMessage.info('该用户尚未上报'); return; }
   detailDialog.value = { visible: true, loading: true, data: null };
-  try {
-    detailDialog.value.data = await subApi.getSubmissionDetail(row.submission_id);
-  } finally {
-    detailDialog.value.loading = false;
-  }
+  try { detailDialog.value.data = await subApi.getSubmissionDetail(row.submission_id); }
+  finally { detailDialog.value.loading = false; }
 }
 
 function openReturn(row: UserSubmissionRow) {
-  if (!row.submission_id) {
-    ElMessage.info('该用户尚未上报');
-    return;
-  }
+  if (!row.submission_id) { ElMessage.info('该用户尚未上报'); return; }
   if (row.display_status !== 'SUBMITTED' && row.display_status !== 'SUBMITTED_LATE') {
-    ElMessage.warning('仅"已上报"的记录可被退回');
-    return;
+    ElMessage.warning('仅"已上报"的记录可被退回'); return;
   }
   returnDialog.value = { visible: true, submitting: false, submissionId: row.submission_id, reason: '' };
 }
 
 async function confirmReturn() {
-  if (returnDialog.value.reason.trim().length < 5) {
-    ElMessage.warning('退回原因至少 5 字');
-    return;
-  }
+  if (returnDialog.value.reason.trim().length < 5) { ElMessage.warning('退回原因至少 5 字'); return; }
   returnDialog.value.submitting = true;
   try {
     await subApi.returnSubmission(returnDialog.value.submissionId, returnDialog.value.reason.trim());
     ElMessage.success('已退回');
     returnDialog.value.visible = false;
     await reload();
-  } finally {
-    returnDialog.value.submitting = false;
-  }
+  } finally { returnDialog.value.submitting = false; }
 }
 
-function actionLabel(t: string) {
-  return { SUBMIT: '提交', RETURN: '退回', RESUBMIT: '重新提交' }[t] || t;
-}
-
-// 编辑对话框
-const editDialog = ref({
-  visible: false,
-  submitting: false,
-  title: '',
-  deadline: '' as string,
-  noDeadline: false,
-});
-
-function openEdit() {
-  if (!detail.value) return;
-  editDialog.value = {
-    visible: true,
-    submitting: false,
-    title: detail.value.title,
-    deadline: detail.value.deadline ? dayjs(detail.value.deadline).format('YYYY-MM-DD HH:mm:00') : '',
-    noDeadline: !detail.value.deadline,
-  };
-}
-
-async function saveEdit() {
-  editDialog.value.submitting = true;
-  try {
-    const input: api.UpdateDocInput = {};
-    if (editDialog.value.title !== detail.value?.title) {
-      input.title = editDialog.value.title;
-    }
-    if (editDialog.value.noDeadline) {
-      input.clear_deadline = true;
-    } else if (editDialog.value.deadline) {
-      input.deadline = dayjs(editDialog.value.deadline).toISOString();
-    }
-    await api.updateDocument(docId, input);
-    ElMessage.success('已保存');
-    editDialog.value.visible = false;
-    await reload();
-  } finally {
-    editDialog.value.submitting = false;
-  }
-}
-
-// 修订日志
-const revisions = ref<DocumentRevision[]>([]);
-const revisionsVisible = ref(false);
-
-async function showRevisions() {
-  revisions.value = await api.listRevisions(docId);
-  revisionsVisible.value = true;
-}
+function actionLabel(t: string) { return { SUBMIT: '提交', RETURN: '退回', RESUBMIT: '重新提交' }[t] || t; }
 
 onMounted(reload);
 </script>
@@ -214,10 +121,8 @@ onMounted(reload);
         </div>
         <div>
           <el-button @click="router.back()">返回</el-button>
-          <el-button v-if="detail.status === 'ACTIVE'" type="primary" plain @click="openEdit">编辑</el-button>
-          <el-button plain @click="showRevisions">修订日志</el-button>
-          <el-button v-if="detail.status === 'ACTIVE'" type="danger" plain @click="onRecall">撤回</el-button>
-          <el-tag v-else type="info">已撤回</el-tag>
+          <el-button v-if="isPublisher && detail.status === 'ACTIVE'" type="danger" plain @click="onRecall">撤回</el-button>
+          <el-tag v-else-if="detail.status === 'RECALLED'" type="info">已撤回</el-tag>
         </div>
       </div>
     </el-card>
@@ -225,7 +130,6 @@ onMounted(reload);
     <el-card style="margin-top: 16px" v-if="detail">
       <h3 style="margin-top: 0">公文正文</h3>
       <div class="content-html" v-html="detail.content_html"></div>
-
       <div v-if="detail.reading_attachments.length" style="margin-top: 16px">
         <AttachmentList :attachments="detail.reading_attachments" title="阅读附件" />
       </div>
@@ -249,16 +153,6 @@ onMounted(reload);
         <div class="stat danger"><span class="num">{{ overview.summary.returned }}</span> 已退回</div>
       </div>
 
-      <el-table v-if="overview.by_department?.length" :data="overview.by_department" border style="margin-top: 16px">
-        <el-table-column prop="department_name" label="部门" />
-        <el-table-column prop="total" label="应交" width="80" />
-        <el-table-column prop="submitted" label="准时" width="80" />
-        <el-table-column prop="late" label="逾期已交" width="100" />
-        <el-table-column prop="pending" label="待交" width="80" />
-        <el-table-column prop="overdue" label="逾期未交" width="100" />
-        <el-table-column prop="returned" label="已退回" width="80" />
-      </el-table>
-
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px">
         <h4 style="margin: 0">用户明细</h4>
         <el-radio-group v-model="overviewStatus" @change="onStatusFilter" size="small">
@@ -273,11 +167,8 @@ onMounted(reload);
       <el-table :data="overview.by_user" border style="margin-top: 12px">
         <el-table-column prop="real_name" label="姓名" width="120" />
         <el-table-column prop="username" label="用户名" width="140" />
-        <el-table-column prop="department_name" label="部门" />
         <el-table-column label="状态" width="120">
-          <template #default="{ row }">
-            <StatusTag :status="row.display_status" />
-          </template>
+          <template #default="{ row }"><StatusTag :status="row.display_status" /></template>
         </el-table-column>
         <el-table-column label="提交时间" width="160">
           <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
@@ -287,14 +178,10 @@ onMounted(reload);
           <template #default="{ row }">
             <el-button size="small" text type="primary"
               :disabled="!row.submission_id || row.display_status === 'PENDING' || row.display_status === 'OVERDUE'"
-              @click="openDetail(row)">
-              查看
-            </el-button>
+              @click="openDetail(row)">查看</el-button>
             <el-button size="small" text type="warning"
               :disabled="row.display_status !== 'SUBMITTED' && row.display_status !== 'SUBMITTED_LATE'"
-              @click="openReturn(row)">
-              退回
-            </el-button>
+              @click="openReturn(row)">退回</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -311,41 +198,25 @@ onMounted(reload);
     </el-card>
   </div>
 
-  <!-- 上报详情对话框 -->
   <el-dialog v-model="detailDialog.visible" title="上报详情" width="720px">
     <div v-loading="detailDialog.loading" style="min-height: 120px">
       <div v-if="detailDialog.data">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="状态">
-            <StatusTag :status="detailDialog.data.display_status" />
-          </el-descriptions-item>
-          <el-descriptions-item label="提交时间">
-            {{ fmt(detailDialog.data.submitted_at) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="退回次数">
-            {{ detailDialog.data.return_count }}
-          </el-descriptions-item>
-          <el-descriptions-item label="最后操作">
-            {{ fmt(detailDialog.data.last_action_at) }}
-          </el-descriptions-item>
-          <el-descriptions-item v-if="detailDialog.data.note" label="备注" :span="2">
-            {{ detailDialog.data.note }}
-          </el-descriptions-item>
+          <el-descriptions-item label="状态"><StatusTag :status="detailDialog.data.display_status" /></el-descriptions-item>
+          <el-descriptions-item label="提交时间">{{ fmt(detailDialog.data.submitted_at) }}</el-descriptions-item>
+          <el-descriptions-item label="退回次数">{{ detailDialog.data.return_count }}</el-descriptions-item>
+          <el-descriptions-item label="最后操作">{{ fmt(detailDialog.data.last_action_at) }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailDialog.data.note" label="备注" :span="2">{{ detailDialog.data.note }}</el-descriptions-item>
           <el-descriptions-item v-if="detailDialog.data.return_reason" label="退回原因" :span="2">
             <span style="color: #f56c6c">{{ detailDialog.data.return_reason }}</span>
           </el-descriptions-item>
         </el-descriptions>
-
-        <div style="margin-top: 16px">
-          <AttachmentList :attachments="detailDialog.data.attachments" title="上报附件" />
-        </div>
-
+        <div style="margin-top: 16px"><AttachmentList :attachments="detailDialog.data.attachments" title="上报附件" /></div>
         <div style="margin-top: 16px" v-if="detailDialog.data.actions.length">
           <strong>操作历史</strong>
           <el-timeline style="margin-top: 8px">
             <el-timeline-item v-for="a in detailDialog.data.actions" :key="a.id"
-              :timestamp="fmt(a.created_at)"
-              :type="a.action_type === 'RETURN' ? 'warning' : 'primary'">
+              :timestamp="fmt(a.created_at)" :type="a.action_type === 'RETURN' ? 'warning' : 'primary'">
               {{ actionLabel(a.action_type) }}
               <span v-if="a.reason" style="color: #909399; margin-left: 8px">— {{ a.reason }}</span>
             </el-timeline-item>
@@ -355,12 +226,11 @@ onMounted(reload);
     </div>
   </el-dialog>
 
-  <!-- 退回对话框 -->
   <el-dialog v-model="returnDialog.visible" title="退回上报" width="500px">
     <el-form label-position="top">
       <el-form-item label="退回原因 (最少 5 字)">
         <el-input v-model="returnDialog.reason" type="textarea" :rows="4"
-          placeholder="请说明退回原因,告知用户如何修改..." maxlength="500" show-word-limit />
+          placeholder="请说明退回原因..." maxlength="500" show-word-limit />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -368,71 +238,16 @@ onMounted(reload);
       <el-button type="warning" :loading="returnDialog.submitting" @click="confirmReturn">确认退回</el-button>
     </template>
   </el-dialog>
-
-  <!-- 编辑对话框 -->
-  <el-dialog v-model="editDialog.visible" title="编辑公文" width="600px">
-    <el-form label-position="top">
-      <el-form-item label="标题">
-        <el-input v-model="editDialog.title" maxlength="200" show-word-limit />
-      </el-form-item>
-      <el-form-item label="截止时间">
-        <el-date-picker v-model="editDialog.deadline" type="datetime" placeholder="选择截止日期时间"
-          :disabled="editDialog.noDeadline" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm:00" />
-        <el-checkbox v-model="editDialog.noDeadline" style="margin-left: 12px">不设截止</el-checkbox>
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="editDialog.visible = false">取消</el-button>
-      <el-button type="primary" :loading="editDialog.submitting" @click="saveEdit">保存</el-button>
-    </template>
-  </el-dialog>
-
-  <!-- 修订日志 -->
-  <el-dialog v-model="revisionsVisible" title="修订日志" width="600px">
-    <el-timeline v-if="revisions.length">
-      <el-timeline-item v-for="r in revisions" :key="r.id" :timestamp="fmt(r.created_at)">
-        <el-tag size="small" style="margin-right: 8px">{{ r.change_type }}</el-tag>
-        {{ r.diff_summary }}
-      </el-timeline-item>
-    </el-timeline>
-    <el-empty v-else description="暂无修订记录" />
-  </el-dialog>
 </template>
 
 <style scoped>
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-.meta {
-  margin-top: 8px;
-  color: #606266;
-  font-size: 13px;
-}
-.content-html :deep(p),
-.content-html :deep(li) {
-  line-height: 1.7;
-}
-.content-html :deep(img) {
-  max-width: 100%;
-}
-.summary {
-  display: flex;
-  gap: 24px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
-.stat {
-  font-size: 14px;
-  color: #606266;
-}
-.stat .num {
-  font-size: 22px;
-  font-weight: 600;
-  color: #303133;
-  margin-right: 4px;
-}
+.header { display: flex; justify-content: space-between; align-items: flex-start; }
+.meta { margin-top: 8px; color: #606266; font-size: 13px; }
+.content-html :deep(p), .content-html :deep(li) { line-height: 1.7; }
+.content-html :deep(img) { max-width: 100%; }
+.summary { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
+.stat { font-size: 14px; color: #606266; }
+.stat .num { font-size: 22px; font-weight: 600; color: #303133; margin-right: 4px; }
 .stat.success .num { color: #67c23a; }
 .stat.warn .num { color: #e6a23c; }
 .stat.info .num { color: #909399; }

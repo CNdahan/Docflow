@@ -3,9 +3,9 @@ package model
 import "time"
 
 const (
-	RoleSuper = "super"
-	RoleDept  = "dept"
-	RoleUser  = "user"
+	RoleSuper  = "super"
+	RoleDept   = "dept"
+	RoleNormal = "normal"
 )
 
 type Department struct {
@@ -30,3 +30,10 @@ type User struct {
 }
 
 func (User) TableName() string { return "users" }
+
+type UserDepartment struct {
+	UserID       int64 `gorm:"primaryKey" json:"user_id"`
+	DepartmentID int64 `gorm:"primaryKey" json:"department_id"`
+}
+
+func (UserDepartment) TableName() string { return "user_departments" }

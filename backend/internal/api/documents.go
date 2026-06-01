@@ -98,3 +98,37 @@ func (h *DocumentHandler) Recall(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
+
+func (h *DocumentHandler) Update(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		abortWithError(c, errs.New(http.StatusBadRequest, "BAD_REQUEST", "id 非法"))
+		return
+	}
+	var in service.UpdateDocInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	role := middleware.CurrentRole(c)
+	uid := middleware.CurrentUserID(c)
+	doc, err := h.svc.Update(id, uid, role, in)
+	if err != nil {
+		abortWithError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, doc)
+}
+
+func (h *DocumentHandler) ListRevisions(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		abortWithError(c, errs.New(http.StatusBadRequest, "BAD_REQUEST", "id 非法"))
+		return
+	}
+	revs, err := h.svc.ListRevisions(id)
+	if err != nil {
+		abortWithError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": revs})
+}

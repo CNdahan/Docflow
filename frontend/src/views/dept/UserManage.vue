@@ -2,101 +2,53 @@
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import * as api from '@/api/admin';
-import type { Department, User } from '@/types';
+import type { User } from '@/types';
 
 const list = ref<User[]>([]);
-const depts = ref<Department[]>([]);
 const total = ref(0);
 const loading = ref(false);
-const filter = reactive({ role: '', department_id: undefined as number | undefined });
 const page = ref(1);
 const size = 20;
 
 const dialogVisible = ref(false);
 const editing = ref<User | null>(null);
-const form = reactive({
-  username: '',
-  password: '',
-  role: 'normal',
-  department_id: undefined as number | undefined,
-  department_ids: [] as number[],
-  real_name: '',
-});
+const form = reactive({ username: '', password: '', real_name: '' });
 
 const pwdDialogVisible = ref(false);
 const pwdUserId = ref<number | null>(null);
 const newPassword = ref('');
 
-function deptName(user: User) {
-  if (user.department_ids?.length) {
-    return user.department_ids.map(id => depts.value.find(d => d.id === id)?.name || '-').join(', ');
-  }
-  if (user.department_id) {
-    return depts.value.find(d => d.id === user.department_id)?.name || '-';
-  }
-  return '-';
-}
-
 async function reload() {
   loading.value = true;
   try {
-    const resp = await api.listUsers({
-      role: filter.role || undefined,
-      department_id: filter.department_id,
-      page: page.value,
-      size,
-    });
+    const resp = await api.listUsers({ page: page.value, size });
     list.value = resp.items;
     total.value = resp.total;
-  } finally {
-    loading.value = false;
-  }
+  } finally { loading.value = false; }
 }
 
 function openCreate() {
   editing.value = null;
-  Object.assign(form, {
-    username: '', password: '', role: 'normal',
-    department_id: undefined, department_ids: [], real_name: '',
-  });
+  Object.assign(form, { username: '', password: '', real_name: '' });
   dialogVisible.value = true;
 }
 
 function openEdit(u: User) {
   editing.value = u;
-  Object.assign(form, {
-    username: u.username,
-    password: '',
-    role: u.role,
-    department_id: u.department_id ?? undefined,
-    department_ids: u.department_ids ?? [],
-    real_name: u.real_name,
-  });
+  Object.assign(form, { username: u.username, password: '', real_name: u.real_name });
   dialogVisible.value = true;
 }
 
 async function onSave() {
   if (editing.value) {
-    const patch: Record<string, any> = { real_name: form.real_name };
-    if (form.role === 'dept' && form.department_id) {
-      patch.department_id = form.department_id;
-    }
-    if (form.role === 'normal') {
-      patch.department_ids = form.department_ids;
-    }
-    await api.updateUser(editing.value.id, patch);
+    await api.updateUser(editing.value.id, { real_name: form.real_name });
     ElMessage.success('已更新');
   } else {
-    if (!form.username || !form.password) {
-      ElMessage.warning('用户名和密码不能为空');
-      return;
-    }
+    if (!form.username || !form.password) { ElMessage.warning('用户名和密码不能为空'); return; }
     await api.createUser({
       username: form.username,
       password: form.password,
-      role: form.role,
-      department_id: form.role === 'dept' ? form.department_id : undefined,
-      department_ids: form.role === 'normal' ? form.department_ids : undefined,
+      role: 'normal',
       real_name: form.real_name,
     });
     ElMessage.success('已创建');
@@ -117,16 +69,12 @@ function openResetPwd(u: User) {
   pwdDialogVisible.value = true;
 }
 async function onResetPwd() {
-  if (!newPassword.value || newPassword.value.length < 8) {
-    ElMessage.warning('新密码至少 8 位');
-    return;
-  }
+  if (!newPassword.value || newPassword.value.length < 8) { ElMessage.warning('新密码至少 8 位'); return; }
   await api.resetPassword(pwdUserId.value!, newPassword.value);
   ElMessage.success('密码已重置');
   pwdDialogVisible.value = false;
 }
 
-// 导入导出
 const importDialog = ref({ visible: false, submitting: false, password: 'init1234' });
 const importResult = ref<api.ImportResult | null>(null);
 const importFileRef = ref<File | null>(null);
@@ -156,27 +104,14 @@ async function doImport() {
   } finally { importDialog.value.submitting = false; }
 }
 
-onMounted(async () => {
-  depts.value = await api.listDepartments();
-  await reload();
-});
+onMounted(reload);
 </script>
 
 <template>
   <el-card>
     <div class="toolbar">
-      <h3 style="margin: 0">用户管理</h3>
+      <h3 style="margin: 0">本部门用户管理</h3>
       <div>
-        <el-select v-model="filter.role" placeholder="全部角色" clearable style="width: 140px; margin-right: 8px"
-          @change="reload">
-          <el-option label="顶级用户" value="super" />
-          <el-option label="部门用户" value="dept" />
-          <el-option label="普通用户" value="normal" />
-        </el-select>
-        <el-select v-model="filter.department_id" placeholder="全部部门" clearable style="width: 160px; margin-right: 8px"
-          @change="reload">
-          <el-option v-for="d in depts" :key="d.id" :label="d.name" :value="d.id" />
-        </el-select>
         <el-button type="primary" @click="openCreate">+ 新建用户</el-button>
         <el-button @click="onExport">导出</el-button>
         <el-button @click="openImport">导入</el-button>
@@ -188,21 +123,9 @@ onMounted(async () => {
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="username" label="用户名" />
       <el-table-column prop="real_name" label="姓名" />
-      <el-table-column label="角色" width="110">
-        <template #default="{ row }">
-          <el-tag :type="row.role === 'super' ? 'danger' : row.role === 'dept' ? 'warning' : 'info'">
-            {{ { super: '顶级', dept: '部门', normal: '普通' }[row.role as string] }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="所属部门">
-        <template #default="{ row }">{{ deptName(row) }}</template>
-      </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.disabled ? 'danger' : 'success'">
-            {{ row.disabled ? '已禁用' : '启用中' }}
-          </el-tag>
+          <el-tag :type="row.disabled ? 'danger' : 'success'">{{ row.disabled ? '已禁用' : '启用中' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="240">
@@ -216,7 +139,8 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
     <el-pagination layout="prev, pager, next" :total="total" :page-size="size" :current-page="page"
-      style="margin-top: 16px; justify-content: flex-end; display: flex" @current-change="(v: number) => { page = v; reload(); }" />
+      style="margin-top: 16px; justify-content: flex-end; display: flex"
+      @current-change="(v: number) => { page = v; reload(); }" />
   </el-card>
 
   <el-dialog v-model="dialogVisible" :title="editing ? '编辑用户' : '新建用户'" width="500px">
@@ -226,23 +150,6 @@ onMounted(async () => {
       </el-form-item>
       <el-form-item label="姓名">
         <el-input v-model="form.real_name" />
-      </el-form-item>
-      <el-form-item label="角色" v-if="!editing">
-        <el-radio-group v-model="form.role">
-          <el-radio value="normal">普通用户</el-radio>
-          <el-radio value="dept">部门用户</el-radio>
-          <el-radio value="super">顶级用户</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item label="所属部门" v-if="form.role === 'dept'">
-        <el-select v-model="form.department_id" placeholder="选择部门" style="width: 100%">
-          <el-option v-for="d in depts" :key="d.id" :label="d.name" :value="d.id" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="所属部门 (可多选)" v-if="form.role === 'normal'">
-        <el-select v-model="form.department_ids" multiple placeholder="选择部门 (可不选)" clearable style="width: 100%">
-          <el-option v-for="d in depts" :key="d.id" :label="d.name" :value="d.id" />
-        </el-select>
       </el-form-item>
       <el-form-item label="初始密码 (至少 8 位)" v-if="!editing">
         <el-input v-model="form.password" type="password" show-password />
@@ -294,9 +201,5 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+.toolbar { display: flex; justify-content: space-between; align-items: center; }
 </style>

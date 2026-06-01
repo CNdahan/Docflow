@@ -45,7 +45,7 @@ export const useAuthStore = defineStore('auth', () => {
       case 'dept':
         return '/dept/documents';
       default:
-        return '/user/inbox';
+        return '/normal/inbox';
     }
   }
 

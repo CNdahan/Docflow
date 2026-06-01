@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ksm/docflow/internal/middleware"
 	"github.com/ksm/docflow/internal/service"
 )
 
@@ -18,8 +19,10 @@ func NewUserHandler(svc *service.UserService) *UserHandler {
 }
 
 func (h *UserHandler) List(c *gin.Context) {
+	op := extractOperator(c)
 	f := service.ListUsersFilter{
-		Role: c.Query("role"),
+		Role:     c.Query("role"),
+		Operator: op,
 	}
 	if v := c.Query("department_id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
@@ -48,7 +51,8 @@ func (h *UserHandler) Create(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	u, err := h.svc.Create(in)
+	op := extractOperator(c)
+	u, err := h.svc.Create(in, op)
 	if err != nil {
 		abortWithError(c, err)
 		return
@@ -66,7 +70,8 @@ func (h *UserHandler) Update(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	u, err := h.svc.Update(id, in)
+	op := extractOperator(c)
+	u, err := h.svc.Update(id, in, op)
 	if err != nil {
 		abortWithError(c, err)
 		return
@@ -88,9 +93,62 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if err := h.svc.ResetPassword(id, req.NewPassword); err != nil {
+	op := extractOperator(c)
+	if err := h.svc.ResetPassword(id, req.NewPassword, op); err != nil {
 		abortWithError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *UserHandler) Export(c *gin.Context) {
+	op := extractOperator(c)
+	f, err := h.svc.ExportUsers(op)
+	if err != nil {
+		abortWithError(c, err)
+		return
+	}
+	defer f.Close()
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=users.xlsx")
+	f.Write(c.Writer)
+}
+
+func (h *UserHandler) ExportTemplate(c *gin.Context) {
+	f, err := h.svc.ExportTemplate()
+	if err != nil {
+		abortWithError(c, err)
+		return
+	}
+	defer f.Close()
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=import_template.xlsx")
+	f.Write(c.Writer)
+}
+
+func (h *UserHandler) Import(c *gin.Context) {
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": "BAD_REQUEST", "message": "请上传文件"})
+		return
+	}
+	defer file.Close()
+	defaultPassword := c.PostForm("default_password")
+	if defaultPassword == "" {
+		defaultPassword = "init1234"
+	}
+	if len(defaultPassword) < 8 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": "BAD_REQUEST", "message": "默认密码至少 8 位"})
+		return
+	}
+	op := service.OperatorCtx{Role: middleware.CurrentRole(c)}
+	if deptID, ok := middleware.CurrentDepartment(c); ok {
+		op.DeptID = &deptID
+	}
+	result, err := h.svc.ImportUsers(file, op, defaultPassword)
+	if err != nil {
+		abortWithError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

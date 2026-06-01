@@ -12,6 +12,7 @@ const routes: RouteRecordRaw[] = [
     meta: { roles: ['super'] },
     children: [
       { path: '', redirect: '/super/documents' },
+      { path: 'dashboard', component: () => import('@/views/super/Dashboard.vue') },
       { path: 'departments', component: () => import('@/views/super/DepartmentManage.vue') },
       { path: 'users', component: () => import('@/views/super/UserManage.vue') },
       { path: 'documents', component: () => import('@/views/super/DocumentList.vue') },
@@ -20,7 +21,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
-  // 部门用户 (M2 完整实现, M1 仅占位避免 404)
+  // 部门用户
   {
     path: '/dept',
     component: () => import('@/views/layout/AppLayout.vue'),
@@ -28,16 +29,19 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dept/documents' },
       { path: 'documents', component: () => import('@/views/dept/DocumentList.vue') },
+      { path: 'documents/new', component: () => import('@/views/dept/DocumentPublish.vue') },
+      { path: 'documents/:id', component: () => import('@/views/dept/DocumentOverview.vue') },
+      { path: 'users', component: () => import('@/views/dept/UserManage.vue') },
     ],
   },
 
   // 普通用户
   {
-    path: '/user',
+    path: '/normal',
     component: () => import('@/views/layout/AppLayout.vue'),
-    meta: { roles: ['user'] },
+    meta: { roles: ['normal'] },
     children: [
-      { path: '', redirect: '/user/inbox' },
+      { path: '', redirect: '/normal/inbox' },
       { path: 'inbox', component: () => import('@/views/user/Inbox.vue') },
       { path: 'documents/:id', component: () => import('@/views/user/DocumentDetail.vue') },
     ],

@@ -8,6 +8,7 @@ import {
   User as UserIcon,
   Box,
   Bell,
+  DataBoard,
 } from '@element-plus/icons-vue';
 
 const router = useRouter();
@@ -18,6 +19,7 @@ const menuItems = computed(() => {
   switch (auth.role) {
     case 'super':
       return [
+        { path: '/super/dashboard', label: '全局看板', icon: DataBoard },
         { path: '/super/documents', label: '公文管理', icon: Document },
         { path: '/super/documents/new', label: '发布公文', icon: Box },
         { path: '/super/departments', label: '部门管理', icon: Folder },
@@ -26,10 +28,12 @@ const menuItems = computed(() => {
     case 'dept':
       return [
         { path: '/dept/documents', label: '公文管理', icon: Document },
+        { path: '/dept/documents/new', label: '发布公文', icon: Box },
+        { path: '/dept/users', label: '用户管理', icon: UserIcon },
       ];
     default:
       return [
-        { path: '/user/inbox', label: '我的公文', icon: Bell },
+        { path: '/normal/inbox', label: '我的公文', icon: Bell },
       ];
   }
 });
@@ -76,7 +80,7 @@ function go(path: string) {
 
 <script lang="ts">
 function roleLabel(role: string) {
-  return { super: '顶级用户', dept: '部门用户', user: '普通用户' }[role] || role;
+  return { super: '顶级用户', dept: '部门用户', normal: '普通用户' }[role] || role;
 }
 </script>
 

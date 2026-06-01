@@ -9,6 +9,8 @@ import (
 	"gorm.io/gorm"
 
 	errs "github.com/ksm/docflow/internal/errors"
+	"github.com/ksm/docflow/internal/middleware"
+	"github.com/ksm/docflow/internal/service"
 )
 
 // abortWithError 把任意 error 翻译成统一 JSON 响应
@@ -41,4 +43,12 @@ func bindJSON(c *gin.Context, dst any) bool {
 		return false
 	}
 	return true
+}
+
+func extractOperator(c *gin.Context) service.OperatorCtx {
+	op := service.OperatorCtx{Role: middleware.CurrentRole(c)}
+	if deptID, ok := middleware.CurrentDepartment(c); ok {
+		op.DeptID = &deptID
+	}
+	return op
 }

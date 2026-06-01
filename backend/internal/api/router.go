@@ -47,18 +47,26 @@ func BuildRouter(cfg *config.Config, tm *auth.TokenManager, h Handlers) *gin.Eng
 
 	authed.POST("/auth/logout", h.Auth.Logout)
 
-	// 部门 + 用户: super
+	// 部门 + 用户: super + dept (service 层控制细粒度权限)
+	adminGroup := authed.Group("")
+	adminGroup.Use(middleware.RequireRole(model.RoleSuper, model.RoleDept))
+	{
+		adminGroup.GET("/departments", h.Department.List)
+		adminGroup.GET("/users", h.User.List)
+		adminGroup.POST("/users", h.User.Create)
+		adminGroup.PATCH("/users/:id", h.User.Update)
+		adminGroup.POST("/users/:id/reset-password", h.User.ResetPassword)
+		adminGroup.GET("/users/export", h.User.Export)
+		adminGroup.GET("/users/export-template", h.User.ExportTemplate)
+		adminGroup.POST("/users/import", h.User.Import)
+	}
+
+	// 部门管理写操作: super only
 	superGroup := authed.Group("")
 	superGroup.Use(middleware.RequireRole(model.RoleSuper))
 	{
-		superGroup.GET("/departments", h.Department.List)
 		superGroup.POST("/departments", h.Department.Create)
 		superGroup.PATCH("/departments/:id", h.Department.Update)
-
-		superGroup.GET("/users", h.User.List)
-		superGroup.POST("/users", h.User.Create)
-		superGroup.PATCH("/users/:id", h.User.Update)
-		superGroup.POST("/users/:id/reset-password", h.User.ResetPassword)
 	}
 
 	// 附件: 所有登录用户都可上传 (后端按 owner_type 校验语义)
@@ -74,8 +82,12 @@ func BuildRouter(cfg *config.Config, tm *auth.TokenManager, h Handlers) *gin.Eng
 	publish.Use(middleware.RequireRole(model.RoleSuper, model.RoleDept))
 	{
 		publish.POST("/documents", h.Document.Publish)
+		publish.PATCH("/documents/:id", h.Document.Update)
 		publish.POST("/documents/:id/recall", h.Document.Recall)
 	}
+
+	// 修订日志 (super + dept)
+	authed.GET("/documents/:id/revisions", h.Document.ListRevisions)
 
 	// 上报
 	authed.POST("/submissions/:id", h.Submission.Submit)         // :id 是 document_id
@@ -83,8 +95,15 @@ func BuildRouter(cfg *config.Config, tm *auth.TokenManager, h Handlers) *gin.Eng
 	authed.GET("/submissions/:id/detail", h.Submission.Detail)
 	authed.POST("/submissions/:id/return", h.Submission.Return)
 
-	// 统计 (M1 仅暴露单公文纵览, 权限通过详情接口的鉴权间接保障)
+	// 统计
 	authed.GET("/stats/documents/:id", h.Stats.DocumentOverview)
+	authed.GET("/stats/documents/:id/export", h.Stats.ExportDocumentOverview)
+	authed.GET("/stats/departments/:id", h.Stats.DepartmentOverview)
+	statsSuper := authed.Group("/stats")
+	statsSuper.Use(middleware.RequireRole(model.RoleSuper))
+	{
+		statsSuper.GET("/global", h.Stats.GlobalOverview)
+	}
 
 	return r
 }
